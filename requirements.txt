@@ -1,0 +1,7 @@
+pip install Flask
+pip install Flask-Cors
+pip install requests
+pip install Pillow
+pip install qrcode
+pip install reportlab
+pip install gunicorn
