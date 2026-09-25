@@ -32,7 +32,7 @@ ESP32_TRIGGER_URL = f"http://{ESP32_CAM_IP}/trigger"
 SMTP_SERVER    = "smtp.gmail.com"
 SMTP_PORT      = 587
 SENDER_EMAIL   = "eexplorations12@gmail.com"
-SENDER_PASSWORD = "***************************"
+SENDER_PASSWORD = "fewl kcyc abch prcf"
 
 OUTPUT_DIR = "certificates"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
