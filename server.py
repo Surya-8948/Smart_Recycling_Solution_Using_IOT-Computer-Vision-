@@ -1,4 +1,7 @@
-
+# server.py — Smart E-Waste Dustbin (MQTT Edition)
+# 🌐 Browser photo capture (webcam / gallery) · 📡 MQTT pub/sub · 🔧 ESP32 servo lid
+# 🏆 Premium PDF certificate + email · ☁️ Render-ready (env-driven config)
+# 💚 Developed for Team E-Explorations — see DEV_* environment variables
 
 import os
 import re
@@ -373,7 +376,7 @@ def download_certificate(rid):
         return jsonify({"error": "Invalid certificate id"}), 400
     path = os.path.join(OUTPUT_DIR, f"certificate_{rid}.pdf")
     if not os.path.exists(path):
-        return jsonify({"error": "Certificate not ready or expired"}), 404
+        return jsonify({"error": "Certificate not ready or expired — the server may have restarted (Render free tier uses ephemeral storage). Set SENDER_EMAIL/SENDER_PASSWORD to receive certificates by email, or download immediately after generation."}), 404
     return send_file(path, mimetype="application/pdf", as_attachment=True,
                      download_name=f"E-Waste_Certificate_{rid}.pdf")
 
@@ -450,7 +453,7 @@ def process_request(request_id: str):
         system_status["last_event"] = f"Sending certificate email to {req['email']}"
         push_event("sending_email", {"email": req["email"], "request_id": request_id})
 
-        email_status = send_certificate_email(req["email"], req["name"], cert_path)
+        email_status, email_error = send_certificate_email(req["email"], req["name"], cert_path)
 
         system_status["processing"]  = False
         system_status["total_today"] += 1     # only confirmed deposits are counted
@@ -463,7 +466,7 @@ def process_request(request_id: str):
         else:
             # Email failed / not configured → certificate stays downloadable on the dashboard
             system_status["last_event"] = f"Certificate ready — download for {req['name']}"
-            push_event("email_failed", {"name": req["name"], "cert_url": cert_url, "reason": email_status, "request_id": request_id})
+            push_event("email_failed", {"name": req["name"], "cert_url": cert_url, "reason": email_status, "request_id": request_id, "error": email_error})
             print(f"🏆 Done for {req['name']} — email {email_status}, cert downloadable: {cert_path}")
     except Exception as e:
         print(f"❌ process_request error for {request_id}: {e}")
@@ -565,10 +568,12 @@ def generate_certificate(name, mobile, email, photo_path, request_id):
 # ==================== EMAIL ====================
 
 def send_certificate_email(recipient_email, name, certificate_path):
-    """Send the certificate PDF by email. Returns 'sent' | 'not_configured' | 'failed'."""
+    """Send the certificate PDF by email.
+    Returns (status, error_detail) — status is 'sent' | 'not_configured' | 'failed';
+    error_detail carries the SMTP error text (shown on the dashboard when failed)."""
     if not SENDER_EMAIL or not SENDER_PASSWORD:
         print("⚠️  SMTP not configured (SENDER_EMAIL / SENDER_PASSWORD) — skipping email")
-        return "not_configured"
+        return "not_configured", ""
 
     msg         = MIMEMultipart()
     msg["From"] = SENDER_EMAIL
@@ -618,10 +623,10 @@ www.smartewaste.com  |  support@smartewaste.com
         srv.send_message(msg)
         srv.quit()
         print(f"📧 Email sent to {recipient_email}")
-        return "sent"
+        return "sent", ""
     except Exception as e:
         print(f"❌ Email failed: {e}")
-        return "failed"
+        return "failed", str(e)[:200]
 
 # ==================== WEB UI ====================
 
@@ -1222,7 +1227,7 @@ evtSource.onmessage = e => {
       stopLidCountdown();
       showStatus('info', msg.reason === 'not_configured'
         ? '⚠️ <strong>Certificate generated!</strong> Email is not configured on the server — download it below.'
-        : '⚠️ <strong>Certificate generated!</strong> Email delivery failed — download it below.');
+        : '⚠️ <strong>Certificate generated!</strong> Email delivery failed' + (msg.error ? ' <small>(' + escapeHtml(msg.error) + ')</small>' : '') + ' — download it below.');
       showDone(msg.cert_url, false); break;
     case 'error':
       stopLidCountdown();
