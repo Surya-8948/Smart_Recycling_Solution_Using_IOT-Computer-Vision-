@@ -1,6 +1,3 @@
-# server.py - Smart E-Waste Dustbin Backend (Enhanced) Diyloyable version with real-time dashboard and premium certificate generation
-
-
 
 import os
 import re
@@ -10,6 +7,7 @@ import queue
 import secrets
 import threading
 import smtplib
+import ssl
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -26,9 +24,12 @@ from reportlab.lib.colors import HexColor
 
 # ==================== CONFIGURATION (env-driven → Render ready) ====================
 MQTT_BROKER       = os.environ.get("MQTT_BROKER", "broker.emqx.io")   # free public test broker
-MQTT_PORT         = int(os.environ.get("MQTT_PORT", "1883"))
+MQTT_PORT         = int(os.environ.get("MQTT_PORT", "8883"))          # 8883 = TLS (secure)
 MQTT_USERNAME     = os.environ.get("MQTT_USERNAME", "")
 MQTT_PASSWORD     = os.environ.get("MQTT_PASSWORD", "")
+MQTT_TLS          = os.environ.get("MQTT_TLS", "true").lower() in ("1", "true", "yes")
+MQTT_CA_CERT      = os.environ.get("MQTT_CA_CERT", "")                # optional: custom CA file path
+MQTT_TLS_VERIFY   = os.environ.get("MQTT_TLS_VERIFY", "true").lower() in ("1", "true", "yes")
 MQTT_TOPIC_PREFIX = os.environ.get("MQTT_TOPIC_PREFIX", "smartbin")
 MQTT_DEVICE_ID    = os.environ.get("MQTT_DEVICE_ID", "bin01")
 
@@ -153,7 +154,7 @@ def on_connect(client, userdata, flags, rc, properties=None):
         client.subscribe(TOPIC_ACK, qos=1)
         client.subscribe(TOPIC_STATUS, qos=1)
         push_event("mqtt_connected", {})
-        print(f"✅ MQTT connected → {MQTT_BROKER}:{MQTT_PORT}")
+        print(f"✅ MQTT connected → {MQTT_BROKER}:{MQTT_PORT}" + (" 🔐 (TLS)" if MQTT_TLS else ""))
         print(f"   📤 publishes → {TOPIC_CMD}")
         print(f"   📥 subscribes → {TOPIC_ACK} , {TOPIC_STATUS}")
     else:
@@ -185,6 +186,18 @@ def start_mqtt():
     _mqtt_started = True
     if MQTT_USERNAME:
         mqtt_client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+    if MQTT_TLS:
+        # 🔐 Secure MQTT (MQTTS): TLS-encrypted connection
+        if MQTT_CA_CERT:
+            # Custom/self-signed CA (e.g. your own Mosquitto broker)
+            mqtt_client.tls_set(ca_certs=MQTT_CA_CERT,
+                                cert_reqs=ssl.CERT_REQUIRED,
+                                tls_version=ssl.PROTOCOL_TLS_CLIENT)
+        else:
+            # System default CAs (works with public brokers like broker.emqx.io)
+            mqtt_client.tls_set_context(ssl.create_default_context())
+        if not MQTT_TLS_VERIFY:
+            mqtt_client.tls_insecure_set(True)
     mqtt_client.on_connect = on_connect
     mqtt_client.on_disconnect = on_disconnect
     mqtt_client.on_message = on_message
@@ -193,7 +206,8 @@ def start_mqtt():
         # connect_async = non-blocking; loop_start auto-reconnects forever
         mqtt_client.connect_async(MQTT_BROKER, MQTT_PORT, keepalive=30)
         mqtt_client.loop_start()
-        print(f"🔌 MQTT connecting → {MQTT_BROKER}:{MQTT_PORT} …")
+        tls_tag = " 🔐 TLS" if MQTT_TLS else ""
+        print(f"🔌 MQTT connecting → {MQTT_BROKER}:{MQTT_PORT}{tls_tag} …")
     except Exception as e:
         print(f"⚠️  MQTT init failed: {e}")
 
@@ -1194,11 +1208,10 @@ setStep(0);
 if __name__ == "__main__":
     print("♻️  Smart E-Waste Dustbin Server — MQTT Edition")
     print(f"   🌐 Web UI      : http://0.0.0.0:{PORT}")
-    print(f"   ☁️  MQTT broker : {MQTT_BROKER}:{MQTT_PORT}")
+    print(f"   ☁️  MQTT broker : {MQTT_BROKER}:{MQTT_PORT}" + (" 🔐 TLS" if MQTT_TLS else ""))
     print(f"   📤 cmd topic   : {TOPIC_CMD}")
     print(f"   📥 ack topic   : {TOPIC_ACK}")
     print(f"   📥 status topic: {TOPIC_STATUS}")
     print(f"   📧 Email       : {SENDER_EMAIL or '(not configured)'}")
     print(f"   👨‍💻 Developer   : {DEV_NAME}")
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)
-
