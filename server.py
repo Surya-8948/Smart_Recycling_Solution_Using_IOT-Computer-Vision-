@@ -12,6 +12,9 @@ import secrets
 import threading
 import smtplib
 import ssl
+import base64
+import urllib.request
+import urllib.error
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -69,6 +72,8 @@ SMTP_SERVER     = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT       = int(os.environ.get("SMTP_PORT", "587"))
 SENDER_EMAIL    = os.environ.get("SENDER_EMAIL", "")
 SENDER_PASSWORD = os.environ.get("SENDER_PASSWORD", "")   # Gmail App Password (env only!)
+RESEND_API_KEY  = os.environ.get("RESEND_API_KEY", "")     # Resend.com API key — RECOMMENDED on Render free tier (SMTP ports are blocked there; the HTTPS API works)
+EMAIL_FROM      = os.environ.get("EMAIL_FROM", "")         # From header, e.g. "Smart E-Waste Bin <onboarding@resend.dev>"
 
 DEV_NAME     = os.environ.get("DEV_NAME", "Your Name")
 DEV_ROLE     = os.environ.get("DEV_ROLE", "IoT Developer")
@@ -567,20 +572,9 @@ def generate_certificate(name, mobile, email, photo_path, request_id):
 
 # ==================== EMAIL ====================
 
-def send_certificate_email(recipient_email, name, certificate_path):
-    """Send the certificate PDF by email.
-    Returns (status, error_detail) — status is 'sent' | 'not_configured' | 'failed';
-    error_detail carries the SMTP error text (shown on the dashboard when failed)."""
-    if not SENDER_EMAIL or not SENDER_PASSWORD:
-        print("⚠️  SMTP not configured (SENDER_EMAIL / SENDER_PASSWORD) — skipping email")
-        return "not_configured", ""
-
-    msg         = MIMEMultipart()
-    msg["From"] = SENDER_EMAIL
-    msg["To"]   = recipient_email
-    msg["Subject"] = "Your E-Waste Contribution Certificate — Smart Dustbin System"
-
-    body = f"""Dear {name},
+def _certificate_email_text(name):
+    """Plain-text body for the certificate email (shared by both providers)."""
+    return f"""Dear {name},
 
 Thank you for contributing to a cleaner and greener environment by using our Smart E-Waste Collection System.
 
@@ -605,6 +599,35 @@ Warm regards,
 Smart E-Waste Management Team
 www.smartewaste.com  |  support@smartewaste.com
 """
+
+
+def send_certificate_email(recipient_email, name, certificate_path):
+    """Send the certificate PDF by email.
+    Returns (status, error_detail) — status is 'sent' | 'not_configured' | 'failed';
+    error_detail carries the error text (shown on the dashboard when failed).
+
+    Two providers — the first one with credentials configured wins:
+      1. Resend HTTP API (RESEND_API_KEY) — RECOMMENDED on Render's free tier:
+         outbound SMTP ports (25/465/587) are blocked there ("Network is
+         unreachable"), but the HTTPS API on port 443 works. Free: 3,000/month.
+      2. SMTP (SENDER_EMAIL + SENDER_PASSWORD) — Gmail App Password etc. Works on
+         paid Render, locally, or anywhere with unrestricted egress."""
+    if RESEND_API_KEY:
+        return _send_email_resend(recipient_email, name, certificate_path)
+    if SENDER_EMAIL and SENDER_PASSWORD:
+        return _send_email_smtp(recipient_email, name, certificate_path)
+    print("⚠️  Email not configured (set RESEND_API_KEY, or SENDER_EMAIL + SENDER_PASSWORD) — skipping email")
+    return "not_configured", ""
+
+
+def _send_email_smtp(recipient_email, name, certificate_path):
+    """Send via SMTP (Gmail App Password, Mailgun SMTP, ...). Returns (status, error_detail)."""
+    msg         = MIMEMultipart()
+    msg["From"] = SENDER_EMAIL
+    msg["To"]   = recipient_email
+    msg["Subject"] = "Your E-Waste Contribution Certificate — Smart Dustbin System"
+
+    body = _certificate_email_text(name)
     msg.attach(MIMEText(body, "plain"))
 
     with open(certificate_path, "rb") as f:
@@ -626,6 +649,47 @@ www.smartewaste.com  |  support@smartewaste.com
         return "sent", ""
     except Exception as e:
         print(f"❌ Email failed: {e}")
+        return "failed", str(e)[:200]
+
+
+def _send_email_resend(recipient_email, name, certificate_path):
+    """Send via the Resend HTTP API (https://resend.com) — no SMTP port needed,
+    so it works on Render's free tier. Returns (status, error_detail)."""
+    with open(certificate_path, "rb") as f:
+        pdf_b64 = base64.b64encode(f.read()).decode("ascii")
+
+    payload = {
+        "from": EMAIL_FROM or "Smart E-Waste Bin <onboarding@resend.dev>",
+        "to": [recipient_email],
+        "subject": "Your E-Waste Contribution Certificate — Smart Dustbin System",
+        "text": _certificate_email_text(name),
+        "attachments": [{
+            "filename": f"E-Waste_Certificate_{name.replace(' ', '_')}.pdf",
+            "content": pdf_b64,
+        }],
+    }
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            print(f"📧 Email sent to {recipient_email} via Resend (HTTP {resp.status})")
+            return "sent", ""
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8", "replace")[:200]
+        except Exception:
+            detail = ""
+        print(f"❌ Resend email failed: HTTP {e.code} {detail}")
+        return "failed", f"Resend HTTP {e.code}: {detail}"
+    except Exception as e:
+        print(f"❌ Resend email failed: {e}")
         return "failed", str(e)[:200]
 
 # ==================== WEB UI ====================
@@ -1266,7 +1330,7 @@ if __name__ == "__main__":
     print(f"   📤 cmd topic   : {TOPIC_CMD}")
     print(f"   📥 ack topic   : {TOPIC_ACK}")
     print(f"   📥 status topic: {TOPIC_STATUS}")
-    print(f"   📧 Email       : {SENDER_EMAIL or '(not configured)'}")
+    print(f"   📧 Email       : {('Resend API' if RESEND_API_KEY else SENDER_EMAIL) or '(not configured)'}")
     print(f"   👨‍💻 Developer   : {DEV_NAME}")
     ensure_mqtt_started()   # dev server: connect immediately (Gunicorn does it lazily)
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)
