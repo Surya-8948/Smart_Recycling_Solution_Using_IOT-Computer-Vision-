@@ -1,4 +1,5 @@
 
+
 import os
 import re
 import json
@@ -21,6 +22,34 @@ import paho.mqtt.client as mqtt
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import landscape, A4
 from reportlab.lib.colors import HexColor
+
+# ── Compatibility shim: pre-load the stdlib 'idna' codec in the MAIN thread ──
+# Werkzeug encodes the server name with the 'idna' codec on EVERY request
+# (werkzeug/routing/map.py -> Map.bind). On some Python builds (e.g. certain
+# Render images) the codec's lazy import fails inside gunicorn worker threads,
+# making every request fail with "LookupError: unknown encoding: idna"
+# (cpython issue #29288). A no-op lookup here — in the main thread, before any
+# worker starts — loads and caches the codec so worker threads never hit the
+# broken path.
+try:
+    "".encode("idna")
+except LookupError:
+    # Last-resort fallback for builds where the stdlib codec is unusable:
+    # register an ASCII passthrough codec (hostnames here are always ASCII,
+    # e.g. *.onrender.com), which is all Werkzeug needs it for.
+    import codecs as _codecs
+
+    def _idna_fallback_search(name):
+        norm = str(name).replace("-", "_").replace(".", "_").lower()
+        if norm in ("idna", "idna_2003"):
+            return _codecs.CodecInfo(
+                name="idna",
+                encode=lambda s, errors="strict": (s.encode("ascii"), len(s)),
+                decode=lambda b, errors="strict": (b.decode("ascii"), len(b)),
+            )
+        return None
+
+    _codecs.register(_idna_fallback_search)
 
 # ==================== CONFIGURATION (env-driven → Render ready) ====================
 MQTT_BROKER       = os.environ.get("MQTT_BROKER", "broker.emqx.io")   # free public test broker
@@ -178,12 +207,12 @@ def on_message(client, userdata, msg):
 
 mqtt_client = _new_mqtt_client()
 _mqtt_started = False
+_mqtt_lock = threading.Lock()
 
 def start_mqtt():
-    global _mqtt_started
-    if _mqtt_started:
-        return
-    _mqtt_started = True
+    """Configure + start the MQTT client. Fully non-blocking: connect_async()
+    only queues the connection, and loop_start() runs the whole network loop
+    (TLS handshake included) in paho's own background thread."""
     if MQTT_USERNAME:
         mqtt_client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     if MQTT_TLS:
@@ -211,7 +240,27 @@ def start_mqtt():
     except Exception as e:
         print(f"⚠️  MQTT init failed: {e}")
 
-start_mqtt()
+def ensure_mqtt_started():
+    """Start MQTT exactly once, LAZILY — on the first request the app serves.
+
+    Why lazy: Gunicorn imports this module while booting a worker. Keeping the
+    import free of network/thread side effects means the worker boots (and
+    starts heart-beating) instantly — no WORKER TIMEOUT during boot. MQTT then
+    connects in the background as soon as the app is actually serving (Render's
+    /api/health health check triggers it immediately after boot)."""
+    global _mqtt_started
+    if _mqtt_started:
+        return
+    with _mqtt_lock:
+        if _mqtt_started:
+            return
+        _mqtt_started = True
+        start_mqtt()
+
+@app.before_request
+def _start_mqtt_when_app_is_ready():
+    # First request (incl. Render's health check) → start MQTT once.
+    ensure_mqtt_started()
 
 # ==================== ROUTES ====================
 
@@ -1208,10 +1257,11 @@ setStep(0);
 if __name__ == "__main__":
     print("♻️  Smart E-Waste Dustbin Server — MQTT Edition")
     print(f"   🌐 Web UI      : http://0.0.0.0:{PORT}")
-    print(f"   ☁️  MQTT broker : {MQTT_BROKER}:{MQTT_PORT}" + (" 🔐 TLS" if MQTT_TLS else ""))
+    print(f"   ☁️  MQTT broker : {MQTT_BROKER}:{MQTT_PORT}" + (" 🔐 TLS" if MQTT_TLS else "") + "  (lazy under Gunicorn — starts on first request)")
     print(f"   📤 cmd topic   : {TOPIC_CMD}")
     print(f"   📥 ack topic   : {TOPIC_ACK}")
     print(f"   📥 status topic: {TOPIC_STATUS}")
     print(f"   📧 Email       : {SENDER_EMAIL or '(not configured)'}")
     print(f"   👨‍💻 Developer   : {DEV_NAME}")
+    ensure_mqtt_started()   # dev server: connect immediately (Gunicorn does it lazily)
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)
