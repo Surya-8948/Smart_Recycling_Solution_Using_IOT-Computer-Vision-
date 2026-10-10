@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart E-Waste Bin — MQTT Edition (Static Preview)</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --forest:#0D3B2E; --green:#1A5C42; --mid:#2D8A62; --leaf:#4DB87A;
+  --cream:#F7F3EC; --gold:#C9A84C; --ink:#1C1C1C; --gray:#6B7280;
+  --lgray:#E5E7EB; --white:#FFFFFF; --red:#DC2626; --blue:#2563EB;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+[hidden]{display:none !important}
+body{font-family:'DM Sans',sans-serif;background:var(--forest);min-height:100vh;display:grid;grid-template-columns:1fr 420px;grid-template-rows:1fr;gap:0}
+
+/* ── LEFT: Live Dashboard ── */
+.dashboard{background:linear-gradient(160deg,#0a2e22 0%,#0D3B2E 60%,#112e24 100%);padding:40px 40px 28px;display:flex;flex-direction:column;gap:22px;overflow-y:auto}
+.brand{display:flex;align-items:center;gap:16px}
+.brand-icon{width:52px;height:52px;background:var(--leaf);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0}
+.brand-text h1{font-family:'Playfair Display',serif;font-size:22px;color:var(--white);line-height:1.2}
+.brand-text p{font-size:12px;color:rgba(255,255,255,.45);margin-top:3px}
+
+.pills-row{display:flex;gap:10px;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:6px 14px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid;transition:all .4s}
+.pill .dot{width:7px;height:7px;border-radius:50%;transition:all .4s}
+.pill.off{background:rgba(220,38,38,.12);color:#FCA5A5;border-color:rgba(220,38,38,.3)}
+.pill.off .dot{background:#FCA5A5}
+.pill.on{background:rgba(77,184,122,.15);color:var(--leaf);border-color:rgba(77,184,122,.35)}
+.pill.on .dot{background:var(--leaf);box-shadow:0 0 0 3px rgba(77,184,122,.25);animation:blink 2s ease infinite}
+.pill.mqtt.on{background:rgba(96,165,250,.15);color:#93C5FD;border-color:rgba(96,165,250,.4)}
+.pill.mqtt.on .dot{background:#60A5FA;box-shadow:0 0 0 3px rgba(96,165,250,.25)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+.lid-hero{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:20px;padding:28px 24px;text-align:center;position:relative;overflow:hidden}
+.lid-hero::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,rgba(77,184,122,.12) 0%,transparent 70%)}
+.lid-icon-wrap{position:relative;width:90px;height:90px;margin:0 auto 18px}
+.lid-icon-bg{width:90px;height:90px;border-radius:50%;background:rgba(77,184,122,.15);border:2px solid rgba(77,184,122,.3);display:flex;align-items:center;justify-content:center;font-size:38px;transition:all .5s ease}
+.lid-icon-bg.open{background:rgba(77,184,122,.25);border-color:var(--leaf);box-shadow:0 0 0 8px rgba(77,184,122,.1),0 0 0 16px rgba(77,184,122,.05)}
+.lid-icon-bg.open .lid-emoji{animation:bounce .6s ease}
+@keyframes bounce{0%,100%{transform:translateY(0)}40%{transform:translateY(-8px)}}
+.lid-pulse{position:absolute;inset:-8px;border-radius:50%;border:2px solid var(--leaf);opacity:0}
+.lid-icon-bg.open ~ .lid-pulse{animation:pulse-ring 1.4s ease infinite}
+@keyframes pulse-ring{0%{transform:scale(1);opacity:.6}100%{transform:scale(1.5);opacity:0}}
+.lid-status-label{font-size:26px;font-weight:700;color:rgba(255,255,255,.7);letter-spacing:-.5px;position:relative}
+.lid-status-label.open{color:var(--leaf)}
+.lid-sub{font-size:13px;color:rgba(255,255,255,.4);margin-top:6px;position:relative}
+.standalone-hint{font-size:12px;color:rgba(255,255,255,.45);text-align:center;background:rgba(255,255,255,.04);border:1px dashed rgba(255,255,255,.14);border-radius:10px;padding:10px 14px;line-height:1.5}
+
+.stats-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.stat-card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:16px 18px}
+.stat-card .label{font-size:11px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.08em;margin-bottom:7px}
+.stat-card .value{font-size:24px;font-weight:700;color:var(--white)}
+.stat-card .value.green{color:var(--leaf)}
+.stat-card .value.amber{color:#FBBF24}
+
+.section-title{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.35);margin-bottom:12px}
+.feed{display:flex;flex-direction:column;gap:10px;max-height:240px;overflow-y:auto}
+.feed::-webkit-scrollbar{width:4px}
+.feed::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}
+.feed-item{display:flex;gap:12px;align-items:flex-start;padding:11px 14px;background:rgba(255,255,255,.04);border-radius:10px;border-left:3px solid transparent;animation:fadeIn .4s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.feed-item.event-lid_open{border-left-color:var(--leaf)}
+.feed-item.event-done{border-left-color:var(--gold)}
+.feed-item.event-esp32_offline,.feed-item.event-mqtt_disconnected,.feed-item.event-mqtt_offline{border-left-color:var(--red)}
+.feed-item.event-cmd_sent{border-left-color:#60A5FA}
+.feed-icon{font-size:15px;flex-shrink:0;margin-top:1px}
+.feed-text{font-size:13px;color:rgba(255,255,255,.7);line-height:1.4;word-break:break-word}
+.feed-time{font-size:11px;color:rgba(255,255,255,.3);margin-top:2px}
+
+
+.dev-card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:18px;display:flex;gap:14px;align-items:center}
+.dev-avatar{width:50px;height:50px;border-radius:50%;background:var(--leaf);color:#0B1F16;font-weight:700;font-size:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.dev-info h3{color:#fff;font-size:15px;font-weight:700}
+.dev-info .role{font-size:12px;color:rgba(255,255,255,.5);margin-top:1px}
+.dev-links{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.dev-links a{font-size:11px;font-weight:600;color:var(--leaf);text-decoration:none;border:1px solid rgba(77,184,122,.35);padding:3px 11px;border-radius:999px;transition:.2s}
+.dev-links a:hover{background:var(--leaf);color:#0B1F16}
+.dev-tag{font-size:11px;color:rgba(255,255,255,.3);margin-top:8px}
+
+/* ── RIGHT: Form panel ── */
+.form-panel{background:var(--white);display:flex;flex-direction:column;overflow-y:auto}
+.form-inner{padding:36px 32px 24px;flex:1;display:flex;flex-direction:column}
+.form-header h2{font-family:'Playfair Display',serif;font-size:26px;color:var(--forest);margin-bottom:6px}
+.form-header p{font-size:13px;color:var(--gray);line-height:1.55}
+.steps{display:flex;gap:8px;margin-top:16px}
+.step{flex:1;text-align:center;font-size:11px;font-weight:700;padding:8px 4px;border-radius:8px;background:#F3F4F6;color:var(--gray);transition:.3s}
+.step.active{background:var(--forest);color:#fff}
+.step.done{background:#BBF7D0;color:#166534}
+
+.accepted-box{background:#F0FDF4;border:1px solid #BBF7D0;border-radius:12px;padding:13px 16px;margin:20px 0;font-size:13px;color:#166534;line-height:1.6}
+.accepted-box strong{display:block;margin-bottom:3px}
+
+.form-group{margin-bottom:16px}
+.form-group label{display:block;font-size:13px;font-weight:700;color:var(--forest);margin-bottom:7px}
+.form-group input{width:100%;padding:12px 15px;border:1.5px solid var(--lgray);border-radius:10px;font-size:15px;font-family:inherit;color:var(--ink);background:#fff;transition:.2s}
+.form-group input:focus{outline:none;border-color:var(--mid);box-shadow:0 0 0 3px rgba(45,138,98,.1)}
+.form-group .hint{font-size:12px;color:var(--gray);margin-top:5px}
+
+.photo-label{display:block;font-size:13px;font-weight:700;color:var(--forest);margin:4px 0 10px}
+.camera-box{background:var(--cream);border:2px dashed var(--lgray);border-radius:14px;height:190px;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;transition:.3s}
+.camera-box.active{border-color:var(--leaf);background:#F0FFF4}
+.camera-box video,.camera-box img{width:100%;height:100%;object-fit:cover;border-radius:12px;background:#000}
+.camera-placeholder{text-align:center;color:var(--gray);padding:10px}
+.camera-placeholder span{font-size:34px;display:block;margin-bottom:6px}
+.camera-placeholder p{font-size:13px}
+.flash-overlay{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .1s;z-index:2}
+.flash-overlay.active{opacity:.9}
+
+.photo-actions{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+.btn-ghost{flex:1;min-width:140px;padding:11px 14px;border-radius:10px;border:1.5px dashed #93C5FD;background:#EFF6FF;color:#1E40AF;font-weight:600;font-size:13.5px;cursor:pointer;font-family:inherit;transition:.2s;display:flex;align-items:center;justify-content:center;gap:8px}
+.btn-ghost:hover{background:#1E40AF;border-color:#1E40AF;color:#fff}
+.btn-ghost.cam{border-color:#86EFAC;background:#F0FDF4;color:#166534}
+.btn-ghost.cam:hover{background:#16A34A;border-color:#16A34A;color:#fff}
+.capture-controls,.retake-controls{display:flex;gap:10px;margin-top:12px}
+.btn-solid{flex:1;padding:12px;border-radius:10px;border:none;background:var(--forest);color:#fff;font-weight:700;font-size:14px;cursor:pointer;font-family:inherit;transition:.2s}
+.btn-solid:hover{background:var(--green)}
+.btn-warn{flex:1;padding:12px;border-radius:10px;border:1.5px solid var(--lgray);background:#fff;color:var(--gray);font-weight:600;font-size:14px;cursor:pointer;font-family:inherit;transition:.2s}
+.btn-warn:hover{border-color:var(--red);color:var(--red)}
+
+.submit-btn{width:100%;padding:16px;background:var(--forest);color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;font-family:inherit;cursor:pointer;transition:.2s;margin-top:18px;letter-spacing:.02em}
+.submit-btn:hover:not(:disabled){background:var(--green);transform:translateY(-2px);box-shadow:0 8px 24px rgba(13,59,46,.25)}
+.submit-btn:disabled{background:var(--lgray);color:var(--gray);cursor:not-allowed}
+
+.status-bar{margin-top:18px;padding:14px 16px;border-radius:10px;font-size:14px;line-height:1.5;animation:fadeIn .3s ease}
+.status-bar.loading{background:#FFF7ED;color:#92400E;border:1px solid #FDE68A;display:flex;align-items:center;gap:10px}
+.status-bar.success{background:#F0FDF4;color:#166534;border:1px solid #BBF7D0}
+.status-bar.error{background:#FEF2F2;color:#991B1B;border:1px solid #FECACA}
+.status-bar.info{background:#EFF6FF;color:#1E40AF;border:1px solid #BFDBFE}
+.spinner{width:18px;height:18px;border:2.5px solid #FDE68A;border-top-color:#92400E;border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.done-box{margin-top:18px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:12px;padding:20px;text-align:center;animation:fadeIn .4s ease}
+.done-box .big{font-size:34px}
+.done-box h3{color:#166534;font-size:17px;margin:8px 0 4px}
+.done-box p{font-size:13px;color:#166534;margin-bottom:14px}
+.download-btn{display:inline-block;padding:12px 26px;background:#16A34A;color:#fff;border-radius:10px;font-weight:700;font-size:14px;text-decoration:none;font-family:inherit;transition:.2s}
+.download-btn:hover{background:#15803D;transform:translateY(-2px)}
+.again-btn{display:inline-block;margin-left:10px;padding:12px 20px;background:#fff;color:#166534;border:1.5px solid #BBF7D0;border-radius:10px;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit;transition:.2s}
+.again-btn:hover{border-color:#16A34A}
+
+.footer-note{text-align:center;font-size:11.5px;color:var(--gray);padding-top:18px}
+.footer-note a{color:var(--mid);text-decoration:none;font-weight:600}
+
+@media (max-width:860px){
+  body{grid-template-columns:1fr;grid-template-rows:auto 1fr}
+  .dashboard{padding:24px 18px;gap:18px}
+  .form-inner{padding:26px 20px}
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════ LEFT: LIVE DASHBOARD ══════════ -->
+<aside class="dashboard">
+
+  <div class="brand">
+    <div class="brand-icon">♻️</div>
+    <div class="brand-text">
+      <h1>Smart E-Waste Bin</h1>
+      <p>MQTT · IoT · Eco-Certify ☁️</p>
+    </div>
+  </div>
+
+  <div class="pills-row">
+    <div class="pill mqtt off" id="mqttPill"><div class="dot"></div><span id="mqttLabel">MQTT Offline</span></div>
+    <div class="pill off" id="espPill"><div class="dot"></div><span id="espLabel">ESP32 Offline</span></div>
+  </div>
+
+  <div class="lid-hero">
+    <div class="lid-icon-wrap">
+      <div class="lid-icon-bg" id="lidIconBg"><span class="lid-emoji" id="lidEmoji">🗑️</span></div>
+      <div class="lid-pulse"></div>
+    </div>
+    <div class="lid-status-label" id="lidLabel">LID CLOSED</div>
+    <div class="lid-sub" id="lidSub">Waiting for next submission</div>
+    <div class="lid-sub" style="margin-top:8px;font-size:12px;color:rgba(255,255,255,.25)" id="lidUpdated">—</div>
+  </div>
+
+  <div class="standalone-hint">🔘 The button on the bin opens it anytime — even without the server (standalone mode)</div>
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="label">Today's Recycled</div><div class="value green" id="statTotal">0</div></div>
+    <div class="stat-card"><div class="label">Last User</div><div class="value" id="statUser" style="font-size:16px;margin-top:4px">—</div></div>
+    <div class="stat-card"><div class="label">Bin Status</div><div class="value amber" id="statProc" style="font-size:15px;margin-top:4px">Idle</div></div>
+    <div class="stat-card"><div class="label">Last Updated</div><div class="value" id="statTime" style="font-size:15px;margin-top:4px">—</div></div>
+  </div>
+
+  <div>
+    <div class="section-title">Live Activity Feed</div>
+    <div class="feed" id="actFeed">
+      <div class="feed-item">
+        <span class="feed-icon">🟢</span>
+        <div><div class="feed-text">System initialised — dashboard live</div><div class="feed-time" id="initTime"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dev-card">
+    <div class="dev-avatar">SM</div>
+    <div class="dev-info">
+      <h3>Surya Mani Bajpai</h3>
+      <div class="role">IoT Developer · Smart E-Waste Bin</div>
+      <div class="dev-links">
+        <a href="https://github.com/Surya-8948/Smart_Recycling_Solution_Using_IOT-Computer-Vision-/blob/main/server.py" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://www.linkedin.com/in/your-handle" target="_blank" rel="noopener">LinkedIn</a>
+        <a href="/cdn-cgi/l/email-protection#c1b8aeb481a4b9a0acb1ada4efa2aeac">Email</a>
+      </div>
+      <div class="dev-tag">Made with 💚 for a greener planet</div>
+    </div>
+  </div>
+
+</aside>
+
+<!-- ══════════ RIGHT: FORM PANEL ══════════ -->
+<main class="form-panel">
+<div class="form-inner">
+
+  <div class="form-header">
+    <h2>Deposit E-Waste</h2>
+    <p>Fill in your details, take a photo, and the bin lid will open automatically via MQTT. You have <strong>30 seconds</strong> to deposit your e-waste — then the lid closes and your certificate is generated and emailed to you.</p>
+    <div class="steps">
+      <div class="step active">1 · Details</div>
+      <div class="step">2 · Photo</div>
+      <div class="step">3 · Submit</div>
+    </div>
+  </div>
+
+  <div class="accepted-box">
+    <strong>✅ Accepted Items</strong>
+    Mobile phones, batteries, chargers, cables, circuit boards, keyboards, mice, remotes, and other small electronic gadgets.
+  </div>
+
+  <form id="ewasteForm">
+    <div class="form-group">
+      <label for="inp_name">Full Name</label>
+      <input type="text" id="inp_name" required placeholder="e.g. Priya Sharma" maxlength="50">
+    </div>
+    <div class="form-group">
+      <label for="inp_mobile">Mobile Number</label>
+      <input type="tel" id="inp_mobile" required placeholder="+91 98765 43210" maxlength="16">
+    </div>
+    <div class="form-group">
+      <label for="inp_email">Email Address</label>
+      <input type="email" id="inp_email" required placeholder="you@example.com">
+      <p class="hint">Your certificate will be sent here</p>
+    </div>
+
+    <label class="photo-label">📸 Your Photo (for the certificate)</label>
+    <div class="camera-box" id="cameraBox">
+      <div class="flash-overlay" id="flash"></div>
+      <div class="camera-placeholder" id="camPlaceholder">
+        <span>📷</span><p>Capture a live photo or upload from gallery</p>
+      </div>
+      <video id="camVideo" autoplay playsinline hidden></video>
+      <img id="camPreview" alt="Your photo preview" hidden>
+    </div>
+
+    <div class="photo-actions" id="photoActions">
+      <button type="button" class="btn-ghost cam" id="btnCam">📷 Live Camera</button>
+      <button type="button" class="btn-ghost" id="btnGallery">🖼️ Upload from Gallery</button>
+      <input type="file" id="galleryInput" accept="image/*" hidden>
+    </div>
+
+    <div class="capture-controls" id="captureControls" hidden>
+      <button type="button" class="btn-solid" id="btnCapture">📸 Capture Photo</button>
+      <button type="button" class="btn-warn" id="btnCancel">Cancel</button>
+    </div>
+
+    <div class="retake-controls" id="retakeControls" hidden>
+      <button type="button" class="btn-warn" id="btnRetake">🔁 Retake Photo</button>
+    </div>
+
+    <button type="submit" class="submit-btn" id="submitBtn" disabled>Capture a Photo to Continue</button>
+  </form>
+
+  <div class="status-bar" id="statusBar" hidden></div>
+
+  <div class="done-box" id="doneBox" hidden>
+    <div class="big">🏆</div>
+    <h3>Certificate Ready!</h3>
+    <p id="doneText">Your certificate has been emailed to you.</p>
+    <a class="download-btn" id="downloadBtn" href="#">📥 Download Certificate (PDF)</a>
+    <button class="again-btn" id="resetBtn">Submit Another</button>
+  </div>
+
+  <div class="footer-note">© 2026 Smart E-Waste Bin · Secured &amp; hosted on <a href="https://render.com" target="_blank" rel="noopener">Render</a> ☁️</div>
+</div>
+</main>
+
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+// ── Helpers ──────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const show = el => el.hidden = false;
+const hide = el => el.hidden = true;
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function nowTime() {
+  return new Date().toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+
+// ── SSE: live dashboard updates ─────────────────────────────
+const evtSource = new EventSource('/api/stream');
+
+const ICONS = {
+  init:'🟢', submission:'📋', cmd_sent:'📡', mqtt_connected:'☁️',
+  mqtt_disconnected:'☁️', mqtt_offline:'🔴', esp32_status:'💓',
+  lid_open:'🔓', lid_closed:'🔒', no_deposit:'⚠️',
+  generating:'🖨️', sending_email:'📧', done:'🏆', email_failed:'⚠️', error:'❌',
+};
+
+function applyStatus(s) {
+  const isOpen = s.lid === 'open';
+  $('lidIconBg').className = 'lid-icon-bg' + (isOpen ? ' open' : '');
+  $('lidEmoji').textContent  = isOpen ? '🔓' : '🗑️';
+  $('lidLabel').textContent  = isOpen ? 'LID  OPEN' : 'LID  CLOSED';
+  $('lidLabel').className    = 'lid-status-label' + (isOpen ? ' open' : '');
+  $('lidSub').textContent    = s.last_event || '—';
+  $('lidUpdated').textContent = 'Updated ' + (s.last_updated || '—');
+
+  $('statTotal').textContent = s.total_today ?? 0;
+  $('statUser').textContent  = s.last_user ?? '—';
+  $('statProc').textContent  = s.processing ? 'Processing…' : 'Idle';
+  $('statTime').textContent  = s.last_updated ?? '—';
+
+  if (s.mqtt_connected) { $('mqttPill').classList.add('on'); $('mqttPill').classList.remove('off'); $('mqttLabel').textContent = 'MQTT Connected'; }
+  else { $('mqttPill').classList.add('off'); $('mqttPill').classList.remove('on'); $('mqttLabel').textContent = 'MQTT Offline'; }
+
+  if (s.esp32_online) { $('espPill').classList.add('on'); $('espPill').classList.remove('off'); $('espLabel').textContent = 'ESP32 Online'; }
+  else { $('espPill').classList.add('off'); $('espPill').classList.remove('on'); $('espLabel').textContent = 'ESP32 Offline'; }
+}
+
+function addFeedItem(type, text) {
+  const feed = $('actFeed');
+  const div  = document.createElement('div');
+  div.className = 'feed-item event-' + type;
+  const icon = document.createElement('span');
+  icon.className = 'feed-icon';
+  icon.textContent = ICONS[type] || '•';
+  const body = document.createElement('div');
+  const txt  = document.createElement('div');
+  txt.className = 'feed-text';
+  txt.textContent = text;                 // ✅ textContent — no XSS
+  const tm = document.createElement('div');
+  tm.className = 'feed-time';
+  tm.textContent = nowTime();
+  body.appendChild(txt); body.appendChild(tm);
+  div.appendChild(icon); div.appendChild(body);
+  feed.insertBefore(div, feed.firstChild);
+  while (feed.children.length > 20) feed.removeChild(feed.lastChild);
+}
+
+function showStatus(type, html) {
+  const el = $('statusBar');
+  el.className = 'status-bar ' + type;
+  el.innerHTML = html;
+  show(el);
+}
+
+// ── Step indicator ───────────────────────────────────────────
+function setStep(n) {
+  document.querySelectorAll('.step').forEach((s, i) => {
+    s.classList.toggle('done',   i < n);
+    s.classList.toggle('active', i === n);
+  });
+}
+
+// ── Photo capture (webcam / gallery) ─────────────────────────
+let capturedPhoto = null;   // File
+let videoStream   = null;
+let currentReqId  = null;
+let submitted     = false;
+
+function resetPhotoUI() {
+  stopCamera();
+  hide($('camVideo')); hide($('camPreview'));
+  hide($('captureControls')); hide($('retakeControls'));
+  show($('camPlaceholder')); show($('photoActions'));
+  $('cameraBox').classList.remove('active');
+  capturedPhoto = null;
+  $('submitBtn').disabled = true;
+  $('submitBtn').textContent = 'Capture a Photo to Continue';
+}
+
+function stopCamera() {
+  if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
+  hide($('camVideo'));
+}
+
+async function startCamera() {
+  hide($('camPlaceholder')); hide($('photoActions'));
+  show($('captureControls'));
+  $('cameraBox').classList.add('active');
+  setStep(1);
+  showStatus('loading', '<div class="spinner"></div><span>Starting camera…</span>');
+  try {
+    videoStream = await navigator.mediaDevices.getUserMedia(
+      { video: { facingMode: 'user', width: 640, height: 480 }, audio: false });
+    $('camVideo').srcObject = videoStream;
+    show($('camVideo'));
+    await $('camVideo').play();
+    $('statusBar').hidden = true;
+  } catch (err) {
+    showStatus('error', '❌ <strong>Camera error:</strong> ' + escapeHtml(err.message) + ' — please upload from gallery instead.');
+    resetPhotoUI();
+  }
+}
+
+async function capturePhoto() {
+  let count = 3;
+  showStatus('info', '📸 Smile! Capturing in <strong>' + count + '</strong>…');
+  const timer = setInterval(() => {
+    count--;
+    if (count > 0) {
+      showStatus('info', '📸 Smile! Capturing in <strong>' + count + '</strong>…');
+    } else {
+      clearInterval(timer);
+      doCapture();
+    }
+  }, 1000);
+}
+
+function doCapture() {
+  const flash = $('flash');
+  flash.classList.add('active');
+  setTimeout(() => flash.classList.remove('active'), 200);
+  const vid = $('camVideo');
+  const canvas = document.createElement('canvas');
+  canvas.width  = vid.videoWidth  || 640;
+  canvas.height = vid.videoHeight || 480;
+  canvas.getContext('2d').drawImage(vid, 0, 0);
+  stopCamera();
+  canvas.toBlob(blob => {
+    capturedPhoto = new File([blob], 'webcam-photo.jpg', { type: 'image/jpeg' });
+    showPreview(URL.createObjectURL(blob));
+  }, 'image/jpeg', 0.9);
+}
+
+function showPreview(src) {
+  hide($('camPlaceholder')); hide($('captureControls'));
+  $('camPreview').src = src;
+  show($('camPreview'));
+  show($('retakeControls'));
+  $('cameraBox').classList.add('active');
+  $('submitBtn').disabled = false;
+  $('submitBtn').textContent = 'Submit & Open Bin 🔓';
+  setStep(2);
+  showStatus('success', '✅ <strong>Photo ready!</strong> Click <strong>Submit &amp; Open Bin</strong> when you are ready.');
+}
+
+$('btnCam').addEventListener('click', startCamera);
+$('btnCancel').addEventListener('click', () => { resetPhotoUI(); setStep(0); });
+$('btnCapture').addEventListener('click', capturePhoto);
+$('btnRetake').addEventListener('click', () => { resetPhotoUI(); setStep(1); });
+$('btnGallery').addEventListener('click', () => $('galleryInput').click());
+$('galleryInput').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    showStatus('error', '❌ Please choose an image file.');
+    return;
+  }
+  capturedPhoto = file;
+  showPreview(URL.createObjectURL(file));
+  $('galleryInput').value = '';
+});
+
+// ── Submit ───────────────────────────────────────────────────
+$('ewasteForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (submitted) return;
+  const name   = $('inp_name').value.trim();
+  const mobile = $('inp_mobile').value.trim();
+  const email  = $('inp_email').value.trim();
+  if (!name || !mobile || !email) { showStatus('error', '❌ Please fill in all your details.'); return; }
+  if (!capturedPhoto)               { showStatus('error', '❌ Please capture or upload a photo first.'); return; }
+
+  submitted = true;
+  $('submitBtn').disabled = true;
+  $('submitBtn').textContent = '⏳ Sending…';
+  showStatus('loading', '<div class="spinner"></div><span>Uploading photo &amp; sending MQTT command to the bin…</span>');
+
+  const fd = new FormData();
+  fd.append('name', name);
+  fd.append('mobile', mobile);
+  fd.append('email', email);
+  fd.append('photo', capturedPhoto);
+
+  try {
+    const res  = await fetch('/api/submit', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Server error');
+    currentReqId = data.request_id;
+    showStatus('loading', '<div class="spinner"></div><span>📡 Command sent to bin — waiting for the lid to open…</span>');
+  } catch (err) {
+    showStatus('error', '❌ ' + escapeHtml(err.message));
+    submitted = false;
+    $('submitBtn').disabled = false;
+    $('submitBtn').textContent = 'Submit & Open Bin 🔓';
+  }
+});
+
+// ── 30-second lid countdown (deposit window) ────────────────
+let lidCountdownTimer = null;
+function startLidCountdown() {
+  stopLidCountdown();
+  let secs = 30;
+  const tick = () => {
+    if (secs > 0) {
+      showStatus('success', '🔓 <strong>Lid is OPEN!</strong> Deposit your e-waste — lid closes in <strong>' + secs + 's</strong>…');
+      secs--;
+    } else {
+      stopLidCountdown();
+      showStatus('loading', '<div class="spinner"></div><span>Deposit window over — closing lid…</span>');
+    }
+  };
+  tick();
+  lidCountdownTimer = setInterval(tick, 1000);
+}
+function stopLidCountdown() {
+  if (lidCountdownTimer) { clearInterval(lidCountdownTimer); lidCountdownTimer = null; }
+}
+
+// ── SSE event handling ───────────────────────────────────────
+const FEED_MESSAGES = {
+  init:              'Dashboard connected — live',
+  mqtt_connected:    '☁️ MQTT broker connected',
+  mqtt_disconnected: '☁️ MQTT broker disconnected — retrying…',
+  mqtt_offline:      '🔴 MQTT offline — bin command could not be sent',
+  submission:        '📋 New submission received',
+  cmd_sent:          '📡 Open-lid command sent to bin via MQTT',
+  lid_open:          '🔓 Lid opened — deposit your e-waste now',
+  lid_closed:        '🔒 Lid closed — deposit confirmed, generating certificate',
+  generating:        '🖨️ Generating your certificate…',
+  sending_email:     '📧 Sending certificate to your email…',
+  done:              '🏆 Certificate ready!',
+  email_failed:      '⚠️ Certificate ready — email not configured, download below',
+  error:             '❌ Processing error — please try again',
+};
+
+evtSource.onmessage = e => {
+  const msg = JSON.parse(e.data);
+  if (msg.status) applyStatus(msg.status);
+  const s = msg.status || {};
+
+  let text = FEED_MESSAGES[msg.type];
+  if (msg.type === 'no_deposit') {
+    text = msg.reason === 'bin_offline'
+      ? '🔴 Bin did not respond — deposit not confirmed, NO certificate issued'
+      : '🔴 Lid did not close — deposit not confirmed, NO certificate issued';
+  } else if (msg.type === 'lid_open') {
+    text = msg.request_id === 'standalone'
+      ? '🔓 Lid opened via button (standalone — no certificate)'
+      : FEED_MESSAGES.lid_open;
+  } else if (msg.type === 'lid_closed') {
+    text = msg.request_id === 'standalone'
+      ? '🔒 Lid closed (standalone mode)'
+      : FEED_MESSAGES.lid_closed;
+  }
+  if (!text && msg.type === 'esp32_status') {
+    text = s.esp32_online ? '💓 ESP32 bin online (heartbeat)' : '🔴 ESP32 bin offline';
+  }
+  if (text) addFeedItem(msg.type, text);
+
+  // Form-side progress — only for THIS session's request
+  // (standalone button events are dashboard-only, they never issue certificates)
+  const mine = currentReqId && (!msg.request_id || msg.request_id === currentReqId);
+  if (!mine) return;
+  switch (msg.type) {
+    case 'lid_open':
+      startLidCountdown(); break;
+    case 'lid_closed':
+      stopLidCountdown();
+      showStatus('loading', '<div class="spinner"></div><span>✅ Deposit window complete — generating your certificate…</span>'); break;
+    case 'no_deposit':
+      stopLidCountdown();
+      showStatus('error', msg.reason === 'bin_offline'
+        ? '❌ <strong>Bin did not respond.</strong> Check ESP32 power &amp; WiFi. No certificate was issued — please try again.'
+        : '❌ <strong>Lid did not close.</strong> Deposit not confirmed — no certificate was issued. Please try again.');
+      submitted = false;
+      $('submitBtn').disabled = false;
+      $('submitBtn').textContent = 'Submit & Open Bin 🔓'; break;
+    case 'generating':
+      showStatus('loading', '<div class="spinner"></div><span>🖨️ Generating certificate…</span>'); break;
+    case 'sending_email':
+      showStatus('loading', '<div class="spinner"></div><span>📧 Sending certificate to your email…</span>'); break;
+    case 'done':
+      stopLidCountdown();
+      showStatus('success', '🏆 <strong>Done!</strong> Certificate sent to your email.');
+      showDone(msg.cert_url, true); break;
+    case 'email_failed':
+      stopLidCountdown();
+      showStatus('info', msg.reason === 'not_configured'
+        ? '⚠️ <strong>Certificate generated!</strong> Email is not configured on the server — download it below.'
+        : '⚠️ <strong>Certificate generated!</strong> Email delivery failed — download it below.');
+      showDone(msg.cert_url, false); break;
+    case 'error':
+      stopLidCountdown();
+      showStatus('error', '❌ Processing error — please try again.');
+      submitted = false;
+      $('submitBtn').disabled = false;
+      $('submitBtn').textContent = 'Submit & Open Bin 🔓'; break;
+  }
+};
+
+evtSource.onerror = () => addFeedItem('mqtt_disconnected', 'SSE connection lost — retrying…');
+
+function showDone(certUrl, emailed) {
+  $('downloadBtn').href = certUrl || '#';
+  $('doneText').textContent = emailed
+    ? 'Your certificate has been emailed to you and is ready to download.'
+    : 'Your certificate could not be emailed — download it here instead.';
+  show($('doneBox'));
+}
+
+$('resetBtn').addEventListener('click', () => location.reload());
+
+// ── Init ─────────────────────────────────────────────────────
+$('initTime').textContent = nowTime();
+setStep(0);
+</script>
+
+<div style="position:fixed;left:0;right:0;bottom:0;z-index:99;background:#FEF3C7;color:#92400E;text-align:center;padding:9px 16px;font-size:13px;font-family:sans-serif;border-top:1px solid #FDE68A">
+  ⚠️ <strong>Static preview</strong> (GitHub Pages) — the live dashboard, form submit &amp; certificates need the Flask server (<code>server.py</code>) running locally or deployed on Render.
+</div>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a48408dfadf959ba',t:'MTc5MTYxODYzMQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
