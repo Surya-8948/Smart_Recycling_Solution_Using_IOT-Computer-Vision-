@@ -674,6 +674,10 @@ def _send_email_resend(recipient_email, name, certificate_path):
         headers={
             "Authorization": f"Bearer {RESEND_API_KEY}",
             "Content-Type": "application/json",
+            # Resend sits behind Cloudflare, which rejects urllib's default
+            # "Python-urllib/3.x" User-Agent with 403 "error code: 1010".
+            # Resend's docs: every API request MUST carry a User-Agent header.
+            "User-Agent": "smart-ewaste-bin/1.0",
         },
         method="POST",
     )
