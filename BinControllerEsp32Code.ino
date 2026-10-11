@@ -185,7 +185,7 @@ void openLid(const String& requestId)
   openedAt         = millis();
   depositSeen      = false;
   irClearSince     = 0;
-  buttonLatch      = false;
+  buttonLatch      = true;
   publishAck("lid_opened", requestId);
   publishStatus();
 }
